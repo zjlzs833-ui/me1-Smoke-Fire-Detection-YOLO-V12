@@ -1,0 +1,12 @@
+# Local test assets
+assets/test.jpg
+assets/test_video.mp4
+
+# Inference outputs
+runs/
+outputs/*.mp4
+outputs/*.avi
+
+# Python cache
+__pycache__/
+*.py[cod]

@@ -2,19 +2,22 @@
 
 ## 项目概览
 
-本项目是一个基于 Ultralytics YOLO/YOLOv12 风格流程的烟雾与火灾检测项目。项目保留了原始 Notebook，同时整理了可在 Windows 本地直接运行的 Python 推理和训练脚本。
+本项目是一个基于 Ultralytics YOLO/YOLOv12 风格流程的烟雾与火灾检测项目。项目保留原始 Notebook，同时提供 Windows 本地可运行的 Python 推理、训练脚本，以及一个用于演示训练权重检测能力的 Web 网站。
 
-推理默认使用项目根目录下的权重文件：
+默认推理权重文件位于项目根目录：
 
 ```text
 Smoke Fire.pt
 ```
 
+不要删除、移动或重命名该权重文件，除非同步修改所有推理入口和后端服务中的模型路径。
+
 ## 主要文件与目录
 
 - `README.md`：原始项目说明。
 - `REPRODUCE.md`：本地复现、环境安装、推理和训练说明。
-- `requirements.txt`：项目依赖列表。
+- `WEB_DESIGN.md`：火灾智能检测网站设计思路与技术要求。
+- `requirements.txt`：Python 依赖列表。
 - `Smoke Fire.pt`：默认推理权重文件。
 - `app.ipynb`：原始视频推理 Notebook。
 - `smoke-fire-detection-yolo-v12.ipynb`：原始训练与数据处理 Notebook。
@@ -22,8 +25,10 @@ Smoke Fire.pt
 - `predict_video.py`：视频检测脚本。
 - `predict_camera.py`：摄像头实时检测脚本。
 - `train_fire.py`：训练脚本。
+- `backend/`：FastAPI 后端服务，提供 Web 检测接口。
+- `frontend/`：React + Vite 前端网站。
 - `assets/`：测试图片和测试视频输入目录。
-- `outputs/`：视频推理输出目录。
+- `outputs/`：推理输出目录。
 - `datasets/fire_smoke/`：YOLO 格式训练数据集骨架。
 - `Screenshots/`：原项目截图目录。
 
@@ -31,7 +36,7 @@ Smoke Fire.pt
 
 - 推荐 conda 环境名：`yolov12_fire`。
 - 推荐 Python 版本：`3.11`。
-- 安装依赖命令：
+- 安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
@@ -40,9 +45,9 @@ pip install -r requirements.txt
 - 所有新增 Python 脚本都应从项目根目录运行。
 - 新增脚本使用相对路径，不依赖作者本机绝对路径。
 - 不要删除原始 Notebook 文件。
-- 不要删除或移动默认权重文件 `Smoke Fire.pt`，除非同步修改脚本中的模型路径。
+- 不要提交本地推理输出、训练输出、前端依赖目录或构建产物。
 
-## 推理入口
+## 命令行推理入口
 
 ### 图片检测
 
@@ -52,7 +57,7 @@ pip install -r requirements.txt
 assets/test.jpg
 ```
 
-默认使用：
+默认参数：
 
 ```text
 MODEL_PATH = Smoke Fire.pt
@@ -60,7 +65,7 @@ CONF_THRESHOLD = 0.25
 IMAGE_SIZE = 640
 ```
 
-推理结果由 Ultralytics 保存，通常位于：
+推理结果通常位于：
 
 ```text
 runs/detect/predict
@@ -81,14 +86,6 @@ assets/test_video.mp4
 outputs/fire_output.mp4
 ```
 
-默认使用：
-
-```text
-MODEL_PATH = Smoke Fire.pt
-CONF_THRESHOLD = 0.25
-IMAGE_SIZE = 640
-```
-
 ### 摄像头检测
 
 `predict_camera.py` 默认使用摄像头索引：
@@ -99,50 +96,66 @@ CAMERA_INDEX = 0
 
 运行后会显示实时检测窗口，按 `q` 退出。
 
-### 推理参数优化经验
+## Web 网站入口
 
-如果测试素材检测效果较弱，可以尝试降低置信度阈值并提高输入尺寸，例如：
+### 后端
 
-```text
-conf = 0.05
-imgsz = 960
+后端位于 `backend/`，使用 FastAPI 启动，并在启动时加载一次 `Smoke Fire.pt`。
+
+运行命令：
+
+```bash
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-这类参数适合用于调试和观察低置信度检测结果。
+主要接口：
 
-## 训练入口
+- `GET /api/health`：检查模型加载状态和运行设备。
+- `POST /api/detect/image`：上传图片并返回标注图、检测框、类别、置信度和告警等级。
+- `POST /api/detect/video`：上传视频并返回标注视频、检测统计和告警等级。
 
-`train_fire.py` 使用 Ultralytics `YOLO` 训练接口，默认初始模型为：
+Web 输出文件保存在：
 
 ```text
-yolo12n.pt
+outputs/web/
 ```
 
-默认数据集配置文件：
+该目录是本地运行产物，不应提交到源码仓库。
 
-```text
-datasets/fire_smoke/data.yaml
+### 前端
+
+前端位于 `frontend/`，使用 React + Vite。
+
+首次运行：
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-默认训练参数：
+如果 PowerShell 阻止 `npm.ps1`，在 Windows 上使用：
 
-```text
-epochs = 60
-imgsz = 640
-batch = 16
+```bash
+npm.cmd run dev
 ```
 
-训练结果通常保存到：
+默认访问地址：
 
 ```text
-runs/detect/train
-runs/detect/train*
+http://127.0.0.1:5173
 ```
 
-最佳权重通常位于：
+前端默认调用：
 
 ```text
-runs/detect/train/weights/best.pt
+http://127.0.0.1:8000
+```
+
+轮播图资源位于：
+
+```text
+frontend/public/banners/
 ```
 
 ## 数据集格式
@@ -187,7 +200,7 @@ class_id x_center y_center width height
 
 ## 依赖
 
-主要依赖包括：
+主要 Python 依赖包括：
 
 - `ultralytics`
 - `torch`
@@ -200,12 +213,16 @@ class_id x_center y_center width height
 - `Pillow`
 - `jupyter`
 - `notebook`
+- `fastapi`
+- `uvicorn[standard]`
+- `python-multipart`
 
-完整依赖以 `requirements.txt` 为准。
+前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准。
 
 ## 提交与文件管理注意事项
 
-- 本地推理输出目录 `runs/` 不应作为源码提交。
-- `outputs/*.mp4` 和 `outputs/*.avi` 是本地运行产物，不应作为源码提交。
-- `assets/test.jpg` 和 `assets/test_video.mp4` 可用于本地验证，但不是项目必须提交的源码。
+- `runs/` 不应作为源码提交。
+- `outputs/*.mp4`、`outputs/*.avi` 和 `outputs/web/` 是本地运行产物，不应提交。
+- `frontend/node_modules/` 和 `frontend/dist/` 不应提交。
+- `assets/test.jpg` 和 `assets/test_video.mp4` 可用于本地验证，但不是必须提交的源码。
 - 原始 Notebook 和 `Smoke Fire.pt` 是项目复现的重要文件，应保持保留。

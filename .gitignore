@@ -6,6 +6,7 @@ assets/test_video.mp4
 runs/
 outputs/*.mp4
 outputs/*.avi
+outputs/web/
 
 # Local training dataset
 datasets/fire_smoke/images/
@@ -14,3 +15,7 @@ datasets/fire_smoke/labels/
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Frontend local artifacts
+frontend/node_modules/
+frontend/dist/

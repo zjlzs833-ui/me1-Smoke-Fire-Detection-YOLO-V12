@@ -9,3 +9,6 @@ matplotlib
 Pillow
 jupyter
 notebook
+fastapi
+uvicorn[standard]
+python-multipart

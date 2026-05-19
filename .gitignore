@@ -7,6 +7,10 @@ runs/
 outputs/*.mp4
 outputs/*.avi
 
+# Local training dataset
+datasets/fire_smoke/images/
+datasets/fire_smoke/labels/
+
 # Python cache
 __pycache__/
 *.py[cod]

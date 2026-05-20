@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import cv2
-import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +29,10 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 app = FastAPI(title="Smoke Fire Detection API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    # The static HTML page may be opened from file://, which sends Origin: null.
+    # This local demo API does not use cookies, so wildcard CORS is appropriate.
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,22 +43,34 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 model: YOLO | None = None
+model_error: str | None = None
 
 
 @app.on_event("startup")
 def load_model() -> None:
-    global model
+    global model, model_error
+
     if not MODEL_PATH.exists():
         model = None
+        model_error = f"找不到模型文件：{MODEL_PATH}"
         return
-    model = YOLO(str(MODEL_PATH))
+
+    try:
+        model = YOLO(str(MODEL_PATH))
+        model_error = None
+    except Exception as exc:  # Depends on local PyTorch/Ultralytics/weight compatibility.
+        model = None
+        model_error = f"模型加载失败：{exc}"
 
 
 def ensure_model() -> YOLO:
+    if model is None and MODEL_PATH.exists():
+        load_model()
+
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail=f"Model is not loaded. Expected weight file: {MODEL_PATH.name}",
+            detail=model_error or f"模型未加载。请确认 {MODEL_PATH.name} 位于项目根目录。",
         )
     return model
 
@@ -69,9 +82,9 @@ def media_url(path: Path) -> str:
 
 def validate_thresholds(conf: float, imgsz: int) -> tuple[float, int]:
     if not 0.01 <= conf <= 0.9:
-        raise HTTPException(status_code=400, detail="conf must be between 0.01 and 0.9")
+        raise HTTPException(status_code=400, detail="conf 必须在 0.01 到 0.9 之间")
     if imgsz < 320 or imgsz > 1280:
-        raise HTTPException(status_code=400, detail="imgsz must be between 320 and 1280")
+        raise HTTPException(status_code=400, detail="imgsz 必须在 320 到 1280 之间")
     return conf, imgsz
 
 
@@ -79,11 +92,14 @@ async def save_upload(file: UploadFile, allowed_extensions: set[str]) -> Path:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in allowed_extensions:
         allowed = ", ".join(sorted(allowed_extensions))
-        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {allowed}")
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型。允许类型：{allowed}")
 
     target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
-    with target.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        with target.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"上传文件保存失败：{exc}") from exc
     return target
 
 
@@ -137,13 +153,23 @@ def summarize(detections: list[dict[str, Any]], frame_count: int | None = None) 
     }
 
 
+def get_device_name() -> str:
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "unknown"
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
         "status": "ok" if model is not None else "model_missing",
         "model_loaded": model is not None,
         "model_path": MODEL_PATH.name,
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "model_error": model_error,
+        "device": get_device_name(),
     }
 
 
@@ -158,11 +184,16 @@ async def detect_image(
     input_path = await save_upload(file, IMAGE_EXTENSIONS)
     output_path = RESULT_DIR / f"{input_path.stem}_detected.jpg"
 
-    results = yolo.predict(source=str(input_path), imgsz=imgsz, conf=conf, verbose=False)
-    result = results[0]
-    annotated = result.plot()
-    if not cv2.imwrite(str(output_path), annotated):
-        raise HTTPException(status_code=500, detail="Failed to write annotated image")
+    try:
+        results = yolo.predict(source=str(input_path), imgsz=imgsz, conf=conf, verbose=False)
+        result = results[0]
+        annotated = result.plot()
+        if not cv2.imwrite(str(output_path), annotated):
+            raise RuntimeError("无法写入标注图片")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"图片模型推理失败：{exc}") from exc
 
     detections = parse_detections(result)
     summary = summarize(detections)
@@ -187,7 +218,7 @@ async def detect_video(
 
     capture = cv2.VideoCapture(str(input_path))
     if not capture.isOpened():
-        raise HTTPException(status_code=400, detail="Unable to open uploaded video")
+        raise HTTPException(status_code=400, detail="无法打开上传的视频文件")
 
     fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -200,25 +231,28 @@ async def detect_video(
     )
     if not writer.isOpened():
         capture.release()
-        raise HTTPException(status_code=500, detail="Unable to create output video")
+        raise HTTPException(status_code=500, detail="无法创建输出视频文件")
 
     frame_count = 0
     all_detections: list[dict[str, Any]] = []
-    while True:
-        ok, frame = capture.read()
-        if not ok:
-            break
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
 
-        results = yolo.predict(source=frame, imgsz=imgsz, conf=conf, verbose=False)
-        result = results[0]
-        writer.write(result.plot())
-        frame_count += 1
+            results = yolo.predict(source=frame, imgsz=imgsz, conf=conf, verbose=False)
+            result = results[0]
+            writer.write(result.plot())
+            frame_count += 1
 
-        for detection in parse_detections(result):
-            all_detections.append({"frame": frame_count, **detection})
-
-    capture.release()
-    writer.release()
+            for detection in parse_detections(result):
+                all_detections.append({"frame": frame_count, **detection})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"视频模型推理失败：{exc}") from exc
+    finally:
+        capture.release()
+        writer.release()
 
     summary = summarize(all_detections, frame_count=frame_count)
     return {

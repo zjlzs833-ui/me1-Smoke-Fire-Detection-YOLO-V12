@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>火灾智能识别系统</title>
+    <title>GPU 火灾智能识别系统</title>
     <style>
       :root {
         --bg: #071018;
-        --panel: rgba(12, 25, 36, 0.9);
-        --line: rgba(134, 190, 214, 0.2);
+        --panel: rgba(12, 25, 36, 0.92);
+        --line: rgba(134, 190, 214, 0.22);
         --text: #edf7ff;
         --muted: #a9c0cf;
         --cyan: #71f0ff;
@@ -21,15 +21,11 @@
         box-sizing: border-box;
       }
 
-      html {
-        scroll-behavior: smooth;
-      }
-
       body {
         margin: 0;
         background:
-          radial-gradient(circle at 10% 8%, rgba(22, 119, 149, 0.2), transparent 25%),
-          radial-gradient(circle at 96% 6%, rgba(255, 107, 54, 0.16), transparent 26%),
+          radial-gradient(circle at 12% 8%, rgba(22, 119, 149, 0.22), transparent 26%),
+          radial-gradient(circle at 96% 4%, rgba(255, 107, 54, 0.16), transparent 27%),
           var(--bg);
         color: var(--text);
         font-family:
@@ -51,7 +47,7 @@
       .topbar {
         align-items: center;
         backdrop-filter: blur(18px);
-        background: rgba(7, 16, 24, 0.8);
+        background: rgba(7, 16, 24, 0.84);
         border-bottom: 1px solid var(--line);
         display: flex;
         justify-content: space-between;
@@ -62,9 +58,19 @@
         z-index: 20;
       }
 
-      .brand {
+      .brand,
+      .nav,
+      .status,
+      .hero-actions,
+      .metric,
+      .panel-head,
+      .chips,
+      .detections {
         align-items: center;
         display: flex;
+      }
+
+      .brand {
         gap: 10px;
         font-size: 18px;
         font-weight: 800;
@@ -76,26 +82,20 @@
         border-radius: 8px;
         color: #170803;
         display: inline-flex;
-        font-size: 20px;
         height: 36px;
         justify-content: center;
         width: 36px;
       }
 
       .nav {
-        align-items: center;
         color: var(--muted);
-        display: flex;
         gap: 18px;
         font-size: 14px;
       }
 
       .status {
-        align-items: center;
         border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 999px;
-        display: inline-flex;
-        gap: 8px;
         min-height: 34px;
         padding: 0 12px;
       }
@@ -106,30 +106,24 @@
       }
 
       .status.warn {
-        background: rgba(255, 107, 54, 0.14);
-        color: #ffb38f;
+        background: rgba(255, 171, 64, 0.14);
+        color: #ffd18a;
+      }
+
+      .status.error {
+        background: rgba(255, 68, 56, 0.15);
+        color: #ffb3a8;
       }
 
       .hero {
-        height: min(720px, calc(100vh - 68px));
         min-height: 560px;
         overflow: hidden;
         position: relative;
       }
 
-      .hero-slide {
-        inset: 0;
-        opacity: 0;
-        position: absolute;
-        transition: opacity 600ms ease;
-      }
-
-      .hero-slide.active {
-        opacity: 1;
-      }
-
-      .hero-slide img {
+      .hero img {
         height: 100%;
+        inset: 0;
         object-fit: cover;
         position: absolute;
         width: 100%;
@@ -137,16 +131,16 @@
 
       .hero::after {
         background:
-          linear-gradient(90deg, rgba(4, 10, 15, 0.94), rgba(4, 10, 15, 0.58) 45%, rgba(4, 10, 15, 0.18)),
-          linear-gradient(0deg, var(--bg), transparent 34%);
+          linear-gradient(90deg, rgba(4, 10, 15, 0.94), rgba(4, 10, 15, 0.58) 48%, rgba(4, 10, 15, 0.18)),
+          linear-gradient(0deg, var(--bg), transparent 36%);
         content: "";
         inset: 0;
         position: absolute;
       }
 
       .hero-content {
-        max-width: 760px;
-        padding: 10vh 5vw 0;
+        max-width: 780px;
+        padding: 92px 5vw 120px;
         position: relative;
         z-index: 2;
       }
@@ -166,8 +160,7 @@
 
       h1 {
         color: #fff;
-        font-size: clamp(42px, 7vw, 84px);
-        letter-spacing: 0;
+        font-size: clamp(42px, 7vw, 82px);
         line-height: 1.04;
         margin-top: 16px;
       }
@@ -177,11 +170,10 @@
         font-size: 20px;
         line-height: 1.7;
         margin-top: 24px;
-        max-width: 620px;
+        max-width: 650px;
       }
 
       .hero-actions {
-        display: flex;
         flex-wrap: wrap;
         gap: 14px;
         margin-top: 34px;
@@ -194,7 +186,7 @@
         cursor: pointer;
         display: inline-flex;
         font-weight: 800;
-        gap: 8px;
+        justify-content: center;
         min-height: 46px;
         padding: 0 18px;
       }
@@ -209,27 +201,9 @@
         color: #fff;
       }
 
-      .dots {
-        bottom: 34px;
-        display: flex;
-        gap: 10px;
-        left: 5vw;
-        position: absolute;
-        z-index: 3;
-      }
-
-      .dots button {
-        background: rgba(255, 255, 255, 0.34);
-        border: 0;
-        border-radius: 999px;
-        cursor: pointer;
-        height: 10px;
-        padding: 0;
-        width: 34px;
-      }
-
-      .dots button.active {
-        background: var(--orange);
+      .button:disabled {
+        cursor: wait;
+        opacity: 0.72;
       }
 
       .metrics,
@@ -246,7 +220,7 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         margin-top: -74px;
         position: relative;
-        z-index: 5;
+        z-index: 4;
       }
 
       .metric,
@@ -258,14 +232,12 @@
       }
 
       .metric {
-        align-items: center;
-        display: flex;
         gap: 12px;
         min-height: 92px;
         padding: 18px;
       }
 
-      .metric-icon {
+      .metric span:nth-child(1) {
         color: var(--cyan);
         font-size: 24px;
       }
@@ -294,8 +266,6 @@
       }
 
       .panel-head {
-        align-items: center;
-        display: flex;
         justify-content: space-between;
         margin-bottom: 20px;
       }
@@ -349,14 +319,8 @@
       }
 
       .detect-button {
-        justify-content: center;
         margin-top: 16px;
         width: 100%;
-      }
-
-      .detect-button:disabled {
-        cursor: wait;
-        opacity: 0.72;
       }
 
       .preview-grid {
@@ -403,7 +367,8 @@
         border: 1px solid rgba(255, 177, 79, 0.28);
       }
 
-      .result-card.danger {
+      .result-card.danger,
+      .result-card.error {
         background: rgba(255, 68, 56, 0.15);
         border: 1px solid rgba(255, 94, 54, 0.32);
       }
@@ -414,17 +379,14 @@
       }
 
       .chips,
-      .detections,
-      .stack {
-        display: flex;
+      .detections {
         flex-wrap: wrap;
         gap: 8px;
         margin-top: 14px;
       }
 
       .chips span,
-      .detections span,
-      .stack span {
+      .detections span {
         background: rgba(255, 255, 255, 0.08);
         border-radius: 999px;
         color: #e7f5ff;
@@ -434,6 +396,7 @@
 
       .message {
         border-radius: 8px;
+        line-height: 1.6;
         margin-top: 16px;
         padding: 12px 14px;
       }
@@ -446,6 +409,11 @@
       .message.info {
         background: rgba(113, 240, 255, 0.1);
         color: #cbf8ff;
+      }
+
+      .message.success {
+        background: rgba(45, 212, 191, 0.12);
+        color: #a5fff3;
       }
 
       .side-list {
@@ -498,15 +466,6 @@
           flex-wrap: wrap;
         }
 
-        .hero {
-          height: auto;
-          min-height: 660px;
-        }
-
-        .hero-content {
-          padding: 82px 24px 130px;
-        }
-
         .metrics,
         .main-grid,
         .info-grid,
@@ -519,82 +478,49 @@
           margin-top: -54px;
         }
       }
-
-      @media (max-width: 560px) {
-        .nav a {
-          display: none;
-        }
-
-        h1 {
-          font-size: 42px;
-        }
-
-        .hero p {
-          font-size: 17px;
-        }
-
-        .hero-actions {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .button {
-          justify-content: center;
-        }
-      }
     </style>
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="#">
         <span class="brand-mark">火</span>
-        <span>火灾智能识别系统</span>
+        <span>GPU 火灾智能识别系统</span>
       </a>
       <nav class="nav">
         <a href="#detect">图片识别</a>
         <a href="#process">系统流程</a>
-        <a href="#camera">摄像头</a>
         <span class="status warn" id="apiStatus">后端检测中</span>
       </nav>
     </header>
 
     <section class="hero">
-      <div class="hero-slide active">
-        <img src="frontend/public/banners/smart-command-center.png" alt="智慧消防监控中心" />
-      </div>
-      <div class="hero-slide">
-        <img src="frontend/public/banners/yolo-industrial-detection.png" alt="工业场景火灾识别" />
-      </div>
-      <div class="hero-slide">
-        <img src="frontend/public/banners/smart-city-warning.png" alt="城市火灾风险预警" />
-      </div>
+      <img src="frontend/public/banners/smart-command-center.png" alt="智慧消防监控中心" />
       <div class="hero-content">
-        <span class="eyebrow" id="heroKicker">智慧消防监控</span>
-        <h1 id="heroTitle">烟雾与火焰智能识别</h1>
-        <p id="heroText">基于训练好的 YOLO 模型，对监控图片进行烟雾和火焰目标检测，输出识别结果、置信度和告警等级。</p>
+        <span class="eyebrow">YOLO GPU 推理</span>
+        <h1>识别任意图片是否发生火灾</h1>
+        <p>上传任意本地图片，后端优先使用 CUDA GPU 调用训练好的 YOLO 权重，返回“发生火灾、疑似火灾风险、未发生火灾”的判断。</p>
         <div class="hero-actions">
           <a class="button primary" href="#detect">开始识别</a>
           <a class="button secondary" href="#process">查看流程</a>
         </div>
       </div>
-      <div class="dots" id="dots"></div>
     </section>
 
     <section class="metrics">
       <div class="metric">
-        <span class="metric-icon">◎</span>
+        <span>◎</span>
         <span>模型权重</span>
         <strong>Smoke Fire.pt</strong>
       </div>
       <div class="metric">
-        <span class="metric-icon">▣</span>
-        <span>识别类别</span>
-        <strong>smoke / fire</strong>
+        <span>▣</span>
+        <span>推理设备</span>
+        <strong id="deviceMetric">检测中</strong>
       </div>
       <div class="metric">
-        <span class="metric-icon">⚑</span>
-        <span>默认参数</span>
-        <strong>conf 0.25</strong>
+        <span>⚑</span>
+        <span>输入来源</span>
+        <strong>任意本地图片</strong>
       </div>
     </section>
 
@@ -603,14 +529,14 @@
         <div class="panel-head">
           <div>
             <span class="eyebrow">图片识别</span>
-            <h2>上传图片并检测烟雾/火焰</h2>
+            <h2>上传图片并判断是否发生火灾</h2>
           </div>
           <span class="metric-icon">▤</span>
         </div>
 
         <label class="upload-box">
           <input id="imageInput" type="file" accept="image/*" />
-          <span id="fileName">选择一张待识别图片</span>
+          <span id="fileName">选择图片，图片不需要放在 datasets 目录</span>
         </label>
 
         <div class="controls">
@@ -631,7 +557,7 @@
         </div>
 
         <button class="button primary detect-button" id="detectButton">开始识别</button>
-        <div id="message" class="message info">后端启动后，可直接上传图片调用 YOLO 模型识别。</div>
+        <div id="message" class="message info">正在检测后端与 GPU 状态。</div>
 
         <div class="preview-grid">
           <div class="preview" id="sourcePreview" hidden>
@@ -646,14 +572,15 @@
 
         <div id="resultCard" class="result-card safe" hidden>
           <div class="result-top">
-            <span>告警等级</span>
-            <strong id="alertLevel">安全</strong>
+            <span>识别结论</span>
+            <strong id="decisionText">未发生火灾</strong>
           </div>
           <p id="summaryText"></p>
           <div class="chips">
             <span id="fireCount">火焰 0</span>
             <span id="smokeCount">烟雾 0</span>
             <span id="maxConfidence">最高置信度 0%</span>
+            <span id="resultDevice">设备 unknown</span>
           </div>
           <div class="detections" id="detections"></div>
         </div>
@@ -662,115 +589,52 @@
       <aside class="panel">
         <div class="panel-head">
           <div>
-            <span class="eyebrow">识别说明</span>
-            <h2>从上传到告警</h2>
+            <span class="eyebrow">系统流程</span>
+            <h2>任意图片输入</h2>
           </div>
         </div>
         <div class="side-list" id="process">
           <div class="side-item">
-            <h3>1. 图像输入</h3>
-            <p>前端读取用户上传的图片，并通过接口发送给 FastAPI 后端。</p>
+            <h3>1. 上传任意图片</h3>
+            <p>网页推理不依赖 `datasets/`。`datasets/` 只用于训练数据。</p>
           </div>
           <div class="side-item">
-            <h3>2. YOLO 推理</h3>
-            <p>后端加载项目根目录的训练权重，对烟雾和火焰目标进行检测。</p>
+            <h3>2. GPU 优先推理</h3>
+            <p>后端检测 `torch.cuda.is_available()`，可用则使用 `device=cuda`，否则回退 CPU 并在页面提示。</p>
           </div>
           <div class="side-item">
-            <h3>3. 结果回传</h3>
-            <p>页面展示检测框、类别、置信度、告警等级和标注后的图片。</p>
+            <h3>3. 火灾结论</h3>
+            <p>检测到 fire 判定“发生火灾”；仅检测到 smoke 判定“疑似火灾风险”；无目标判定“未发生火灾”。</p>
           </div>
         </div>
       </aside>
     </section>
 
     <section class="info-grid">
-      <article class="panel" id="camera">
-        <span class="eyebrow">实时摄像头</span>
-        <h2>本地摄像头检测</h2>
-        <p>摄像头实时检测继续使用现有 Python 脚本，适合 Windows 本地演示。</p>
-        <code>python predict_camera.py</code>
+      <article class="panel">
+        <span class="eyebrow">后端启动</span>
+        <h2>FastAPI</h2>
+        <code>uvicorn backend.main:app --host 127.0.0.1 --port 8000</code>
       </article>
       <article class="panel">
-        <span class="eyebrow">后端服务</span>
-        <h2>启动 API</h2>
-        <p>图片识别接口依赖 FastAPI 服务。后端运行后，页面会自动显示模型状态。</p>
-        <code>uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000</code>
+        <span class="eyebrow">页面启动</span>
+        <h2>静态服务</h2>
+        <code>python -m http.server 5173 --bind 127.0.0.1</code>
       </article>
       <article class="panel">
-        <span class="eyebrow">技术栈</span>
-        <h2>HTML + YOLO</h2>
-        <p>页面是纯 HTML 文件，样式和交互都在当前文件内，不依赖 Vite 开发服务。</p>
-        <div class="stack">
-          <span>HTML</span>
-          <span>CSS</span>
-          <span>JavaScript</span>
-          <span>FastAPI</span>
-          <span>YOLO</span>
-        </div>
+        <span class="eyebrow">GPU 环境</span>
+        <h2>CUDA PyTorch</h2>
+        <p>如果页面显示 CPU，说明当前 Python 环境安装的是 CPU 版 PyTorch，需要安装 CUDA 版 PyTorch。</p>
       </article>
     </section>
 
     <script>
       const API_BASE = "http://127.0.0.1:8000";
-      const slides = [
-        {
-          kicker: "智慧消防监控",
-          title: "烟雾与火焰智能识别",
-          text: "基于训练好的 YOLO 模型，对监控图片进行烟雾和火焰目标检测，输出识别结果、置信度和告警等级。",
-        },
-        {
-          kicker: "YOLO 实时识别",
-          title: "面向监控场景的目标检测",
-          text: "适用于园区、仓库、机房和城市监控素材的本地演示识别。",
-        },
-        {
-          kicker: "风险预警联动",
-          title: "从发现异常到辅助研判",
-          text: "将模型检测结果转化为清晰告警摘要，让烟火风险更早被看见。",
-        },
-      ];
-
-      const slideEls = Array.from(document.querySelectorAll(".hero-slide"));
-      const dotsEl = document.getElementById("dots");
-      const heroKicker = document.getElementById("heroKicker");
-      const heroTitle = document.getElementById("heroTitle");
-      const heroText = document.getElementById("heroText");
-      let activeSlide = 0;
-
-      slides.forEach((slide, index) => {
-        const dot = document.createElement("button");
-        dot.type = "button";
-        dot.setAttribute("aria-label", `切换到${slide.kicker}`);
-        dot.addEventListener("click", () => setSlide(index));
-        dotsEl.appendChild(dot);
-      });
-
-      function setSlide(index) {
-        activeSlide = index;
-        slideEls.forEach((el, i) => el.classList.toggle("active", i === index));
-        Array.from(dotsEl.children).forEach((el, i) => el.classList.toggle("active", i === index));
-        heroKicker.textContent = slides[index].kicker;
-        heroTitle.textContent = slides[index].title;
-        heroText.textContent = slides[index].text;
-      }
-
-      setSlide(0);
-      window.setInterval(() => setSlide((activeSlide + 1) % slides.length), 5200);
+      let apiReady = false;
+      let lastHealth = null;
 
       const apiStatus = document.getElementById("apiStatus");
-      async function checkApi() {
-        try {
-          const response = await fetch(`${API_BASE}/api/health`);
-          const data = await response.json();
-          apiStatus.className = `status ${data.model_loaded ? "ready" : "warn"}`;
-          apiStatus.textContent = data.model_loaded ? `模型已加载 / ${data.device}` : "模型未加载";
-        } catch {
-          apiStatus.className = "status warn";
-          apiStatus.textContent = "后端未启动";
-        }
-      }
-      checkApi();
-
+      const deviceMetric = document.getElementById("deviceMetric");
       const imageInput = document.getElementById("imageInput");
       const fileName = document.getElementById("fileName");
       const confInput = document.getElementById("confInput");
@@ -783,12 +647,52 @@
       const resultPreview = document.getElementById("resultPreview");
       const resultImage = document.getElementById("resultImage");
       const resultCard = document.getElementById("resultCard");
-      const alertLevel = document.getElementById("alertLevel");
+      const decisionText = document.getElementById("decisionText");
       const summaryText = document.getElementById("summaryText");
       const fireCount = document.getElementById("fireCount");
       const smokeCount = document.getElementById("smokeCount");
       const maxConfidence = document.getElementById("maxConfidence");
+      const resultDevice = document.getElementById("resultDevice");
       const detections = document.getElementById("detections");
+
+      async function checkApi({ showMessage = false } = {}) {
+        try {
+          const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+          const data = await response.json();
+          lastHealth = data;
+          apiReady = Boolean(response.ok && data.model_loaded);
+          const deviceLabel = data.gpu_name ? `GPU: ${data.gpu_name}` : `设备: ${data.inference_device || data.device || "unknown"}`;
+          deviceMetric.textContent = data.inference_device || data.device || "unknown";
+
+          if (apiReady) {
+            apiStatus.className = "status ready";
+            apiStatus.textContent = `模型已加载 / ${data.inference_device}`;
+            if (showMessage) {
+              const note = data.cuda_available
+                ? `后端已连接，正在使用 ${deviceLabel}。`
+                : "后端已连接，但当前 PyTorch 是 CPU 模式；安装 CUDA 版 PyTorch 后会自动使用 GPU。";
+              setMessage(note, data.cuda_available ? "success" : "info");
+            }
+          } else {
+            apiStatus.className = "status warn";
+            apiStatus.textContent = data.health_state === "model_error" ? "模型加载失败" : "模型未加载";
+            if (showMessage) setMessage(data.message || "模型尚未加载。", "error");
+          }
+        } catch {
+          apiReady = false;
+          lastHealth = null;
+          apiStatus.className = "status error";
+          apiStatus.textContent = "后端未启动";
+          deviceMetric.textContent = "离线";
+          if (showMessage) {
+            setMessage("后端未启动。请先运行：uvicorn backend.main:app --host 127.0.0.1 --port 8000", "error");
+          }
+        }
+        return apiReady;
+      }
+
+      checkApi({ showMessage: true });
+      window.setInterval(() => checkApi(), 3000);
 
       confInput.addEventListener("input", () => {
         confValue.textContent = Number(confInput.value).toFixed(2);
@@ -800,15 +704,23 @@
         fileName.textContent = file.name;
         sourceImage.src = URL.createObjectURL(file);
         sourcePreview.hidden = false;
-        resultPreview.hidden = true;
-        resultCard.hidden = true;
-        setMessage("已选择图片，可以开始识别。", "info");
+        clearResult();
+        setMessage("已选择图片。点击开始识别后，后端会判断是否发生火灾。", "info");
       });
 
       detectButton.addEventListener("click", async () => {
         const file = imageInput.files[0];
         if (!file) {
           setMessage("请先选择一张图片。", "error");
+          clearResult();
+          return;
+        }
+
+        const ready = await checkApi();
+        if (!ready) {
+          const detail = lastHealth?.message || "请先启动后端服务。";
+          setMessage(detail, "error");
+          clearResult();
           return;
         }
 
@@ -819,7 +731,8 @@
 
         detectButton.disabled = true;
         detectButton.textContent = "识别中...";
-        setMessage("正在调用后端 YOLO 模型，请稍候。", "info");
+        clearResult();
+        setMessage("正在调用 YOLO 模型进行火灾识别。", "info");
 
         try {
           const response = await fetch(`${API_BASE}/api/detect/image`, {
@@ -827,13 +740,12 @@
             body: formData,
           });
           const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.detail || "识别失败");
-          }
+          if (!response.ok) throw new Error(payload.detail || "识别失败");
           renderResult(payload);
-          setMessage("识别完成。", "info");
+          setMessage("识别完成。", "success");
         } catch (error) {
-          setMessage(error.message || "识别失败，请确认后端服务已启动。", "error");
+          clearResult();
+          setMessage(error.message || "识别失败，请确认后端服务和模型权重正常。", "error");
         } finally {
           detectButton.disabled = false;
           detectButton.textContent = "开始识别";
@@ -846,24 +758,42 @@
         resultPreview.hidden = false;
         resultCard.hidden = false;
         resultCard.className = `result-card ${payload.alert_level || "safe"}`;
-        alertLevel.textContent = levelText(payload.alert_level);
+        decisionText.textContent = payload.decision || levelText(payload.alert_level);
         summaryText.textContent = summary.message || "未检测到明显烟雾或火焰。";
         fireCount.textContent = `火焰 ${summary.fire_count || 0}`;
         smokeCount.textContent = `烟雾 ${summary.smoke_count || 0}`;
         maxConfidence.textContent = `最高置信度 ${(((summary.max_confidence || 0) * 100).toFixed(1))}%`;
+        resultDevice.textContent = `设备 ${payload.inference_device || "unknown"}`;
         detections.innerHTML = "";
-        (payload.detections || []).slice(0, 12).forEach((item) => {
+
+        const items = payload.detections || [];
+        if (items.length === 0) {
+          const tag = document.createElement("span");
+          tag.textContent = "无检测目标";
+          detections.appendChild(tag);
+          return;
+        }
+
+        items.slice(0, 12).forEach((item) => {
           const tag = document.createElement("span");
           tag.textContent = `${item.class_name} ${(item.confidence * 100).toFixed(1)}%`;
           detections.appendChild(tag);
         });
       }
 
+      function clearResult() {
+        resultPreview.hidden = true;
+        resultImage.removeAttribute("src");
+        resultCard.hidden = true;
+        detections.innerHTML = "";
+      }
+
       function levelText(level) {
         return {
-          danger: "危险",
-          warning: "预警",
-          safe: "安全",
+          danger: "发生火灾",
+          warning: "疑似火灾风险",
+          safe: "未发生火灾",
+          error: "识别错误",
         }[level] || "未知";
       }
 

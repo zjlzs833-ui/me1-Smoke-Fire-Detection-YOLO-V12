@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -29,8 +30,6 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 app = FastAPI(title="Smoke Fire Detection API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    # The static HTML page may be opened from file://, which sends Origin: null.
-    # This local demo API does not use cookies, so wildcard CORS is appropriate.
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
@@ -44,12 +43,24 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 model: YOLO | None = None
 model_error: str | None = None
+inference_device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def device_info() -> dict[str, Any]:
+    cuda_available = torch.cuda.is_available()
+    return {
+        "device": "cuda" if cuda_available else "cpu",
+        "cuda_available": cuda_available,
+        "gpu_name": torch.cuda.get_device_name(0) if cuda_available else None,
+        "torch_version": torch.__version__,
+    }
 
 
 @app.on_event("startup")
 def load_model() -> None:
-    global model, model_error
+    global model, model_error, inference_device
 
+    inference_device = "cuda" if torch.cuda.is_available() else "cpu"
     if not MODEL_PATH.exists():
         model = None
         model_error = f"找不到模型文件：{MODEL_PATH}"
@@ -57,8 +68,9 @@ def load_model() -> None:
 
     try:
         model = YOLO(str(MODEL_PATH))
+        model.to(inference_device)
         model_error = None
-    except Exception as exc:  # Depends on local PyTorch/Ultralytics/weight compatibility.
+    except Exception as exc:
         model = None
         model_error = f"模型加载失败：{exc}"
 
@@ -113,13 +125,12 @@ def parse_detections(result: Any) -> list[dict[str, Any]]:
         confidence = float(box.conf[0].item())
         xyxy = [round(float(value), 2) for value in box.xyxy[0].tolist()]
         class_name = CLASS_NAMES.get(class_id, result.names.get(class_id, str(class_id)))
-        alert = class_name == "fire" or (class_name == "smoke" and confidence >= 0.5)
         detections.append(
             {
                 "class_name": class_name,
                 "confidence": round(confidence, 4),
                 "bbox": xyxy,
-                "alert": alert,
+                "alert": class_name == "fire",
             }
         )
     return detections
@@ -129,19 +140,27 @@ def summarize(detections: list[dict[str, Any]], frame_count: int | None = None) 
     fire_count = sum(1 for item in detections if item["class_name"] == "fire")
     smoke_count = sum(1 for item in detections if item["class_name"] == "smoke")
     max_confidence = max((item["confidence"] for item in detections), default=0)
+    fire_occurred = fire_count > 0
+    smoke_detected = smoke_count > 0
 
-    if fire_count:
+    if fire_occurred:
         alert_level = "danger"
-        message = f"检测到 {fire_count} 个火焰目标，建议立即核查现场。"
-    elif smoke_count:
+        decision = "发生火灾"
+        message = f"检测到 {fire_count} 个火焰目标，判断为发生火灾，请立即核查现场。"
+    elif smoke_detected:
         alert_level = "warning"
-        message = f"检测到 {smoke_count} 个烟雾目标，建议持续观察。"
+        decision = "疑似火灾风险"
+        message = f"检测到 {smoke_count} 个烟雾目标，暂未检测到火焰，建议持续观察。"
     else:
         alert_level = "safe"
-        message = "未检测到明显烟雾或火焰。"
+        decision = "未发生火灾"
+        message = "未检测到明显烟雾或火焰，当前图片未发现火灾迹象。"
 
     return {
         "alert_level": alert_level,
+        "fire_occurred": fire_occurred,
+        "smoke_detected": smoke_detected,
+        "decision": decision,
         "summary": {
             "message": message,
             "fire_count": fire_count,
@@ -153,23 +172,28 @@ def summarize(detections: list[dict[str, Any]], frame_count: int | None = None) 
     }
 
 
-def get_device_name() -> str:
-    try:
-        import torch
-
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    except Exception:
-        return "unknown"
-
-
 @app.get("/api/health")
 def health() -> dict[str, Any]:
+    info = device_info()
+    if model is not None:
+        health_state = "ready"
+        message = "后端可访问，模型已加载。"
+    elif model_error:
+        health_state = "model_error"
+        message = model_error
+    else:
+        health_state = "loading"
+        message = "后端可访问，模型正在加载或尚未加载。"
+
     return {
         "status": "ok" if model is not None else "model_missing",
+        "health_state": health_state,
         "model_loaded": model is not None,
         "model_path": MODEL_PATH.name,
         "model_error": model_error,
-        "device": get_device_name(),
+        "message": message,
+        "inference_device": inference_device,
+        **info,
     }
 
 
@@ -185,7 +209,13 @@ async def detect_image(
     output_path = RESULT_DIR / f"{input_path.stem}_detected.jpg"
 
     try:
-        results = yolo.predict(source=str(input_path), imgsz=imgsz, conf=conf, verbose=False)
+        results = yolo.predict(
+            source=str(input_path),
+            imgsz=imgsz,
+            conf=conf,
+            device=inference_device,
+            verbose=False,
+        )
         result = results[0]
         annotated = result.plot()
         if not cv2.imwrite(str(output_path), annotated):
@@ -201,6 +231,7 @@ async def detect_image(
         "result_image_url": media_url(output_path),
         "source_image_url": media_url(input_path),
         "detections": detections,
+        "inference_device": inference_device,
         **summary,
     }
 
@@ -241,7 +272,13 @@ async def detect_video(
             if not ok:
                 break
 
-            results = yolo.predict(source=frame, imgsz=imgsz, conf=conf, verbose=False)
+            results = yolo.predict(
+                source=frame,
+                imgsz=imgsz,
+                conf=conf,
+                device=inference_device,
+                verbose=False,
+            )
             result = results[0]
             writer.write(result.plot())
             frame_count += 1
@@ -261,5 +298,6 @@ async def detect_video(
         "frame_count": frame_count,
         "detections_count": len(all_detections),
         "detections": all_detections[:200],
+        "inference_device": inference_device,
         **summary,
     }

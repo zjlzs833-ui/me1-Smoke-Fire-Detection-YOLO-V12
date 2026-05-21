@@ -46,9 +46,11 @@ FEISHU_WEBHOOK_SECRET=optional-sign-secret
 - `GET /api/streams/{stream_id}`
 - `GET /api/streams/{stream_id}/mjpeg`
 - `POST /api/streams/{stream_id}/stop`
-- `GET /api/history`
+- `GET /api/history` (`source_type=image|video|rtsp`, `alert_level=danger|safe` 可选)
 - `GET /api/history/{event_id}`
 - `POST /api/history/{event_id}/feishu`
 - `POST /api/feishu/test`
 
 Runtime media is saved under `outputs/web/`, and the SQLite database is saved at `outputs/web/data/fire_events.sqlite3`.
+
+The realtime stream API is intended for the local demo console and limits active RTSP camera tasks to 3 at a time.

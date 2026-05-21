@@ -838,6 +838,11 @@ def create_stream(payload: StreamCreate) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="rtsp_url 不能为空")
     stream = StreamState(payload)
     with streams_lock:
+        active_streams = sum(
+            1 for item in streams.values() if item.status not in {"stopped", "error", "offline"}
+        )
+        if active_streams >= 3:
+            raise HTTPException(status_code=400, detail="最多同时接入 3 路摄像头")
         streams[stream.id] = stream
     stream.start()
     return stream.to_dict(include_url=True)
@@ -885,15 +890,20 @@ def get_stream_or_404(stream_id: str) -> StreamState:
 def list_history(
     limit: int = 20,
     offset: int = 0,
+    source_type: str | None = None,
     alert_level: str | None = None,
 ) -> dict[str, Any]:
     limit = min(max(limit, 1), 100)
     offset = max(offset, 0)
-    where = ""
+    conditions: list[str] = []
     params: list[Any] = []
+    if source_type:
+        conditions.append("source_type = ?")
+        params.append(source_type)
     if alert_level:
-        where = "WHERE alert_level = ?"
+        conditions.append("alert_level = ?")
         params.append(alert_level)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     with open_db() as connection:
         connection.row_factory = sqlite3.Row

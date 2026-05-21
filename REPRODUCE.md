@@ -125,6 +125,46 @@ python predict_camera.py
 
 Press `q` to quit the camera window.
 
+## 8.1 Web Monitoring Console
+
+The web backend should run with Python 3.11 from the conda environment:
+
+```bash
+conda activate yolov12_fire
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Or run it without activating the environment:
+
+```bash
+conda run -n yolov12_fire uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Optional Feishu group bot configuration:
+
+```powershell
+$env:FEISHU_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/xxxx"
+$env:FEISHU_WEBHOOK_SECRET="optional-sign-secret"
+```
+
+You may also put the same keys in `.env` or `backend/.env` so the backend can read them after restart.
+
+Start the frontend on Windows PowerShell:
+
+```bash
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+The web console supports RTSP stream detection, image/video upload detection, Feishu alert testing, and SQLite history under `outputs/web/data/fire_events.sqlite3`.
+
 ## 9. Prepare a Training Dataset
 
 Prepare a YOLO-format dataset under:

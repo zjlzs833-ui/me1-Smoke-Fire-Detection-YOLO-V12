@@ -7,6 +7,7 @@ import {
   Camera,
   CheckCircle2,
   Clock,
+  Cpu,
   Database,
   Flame,
   Gauge,
@@ -18,10 +19,13 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
+  SlidersHorizontal,
   Square,
+  Thermometer,
   Upload,
   Video,
   WifiOff,
+  Wind,
 } from "lucide-react";
 import "./styles.css";
 
@@ -84,6 +88,10 @@ function App() {
   const [historyFilters, setHistoryFilters] = useState({ sourceType: "", alertLevel: "" });
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [fusionStatus, setFusionStatus] = useState(null);
+  const [fusionHistory, setFusionHistory] = useState([]);
+  const [fusionLoading, setFusionLoading] = useState(false);
+  const [fusionError, setFusionError] = useState("");
 
   async function refreshHealth() {
     try {
@@ -169,10 +177,59 @@ function App() {
     }
   }
 
+  async function loadFusionStatus(options = {}) {
+    if (options.loading) setFusionLoading(true);
+    try {
+      const payload = await fetchJson("/api/fusion/status");
+      setFusionStatus(payload);
+      setFusionError("");
+      setFusionHistory((current) => [payload, ...current].slice(0, 28));
+      if (payload.history_event) {
+        loadHistory(historyFilters, { promoteLatest: true });
+      }
+    } catch (err) {
+      setFusionError(err.message || "融合状态获取失败");
+    } finally {
+      if (options.loading) setFusionLoading(false);
+    }
+  }
+
+  async function switchSensorMode(mode) {
+    setFusionLoading(true);
+    try {
+      await fetchJson("/api/sensors/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      await loadFusionStatus();
+    } catch (err) {
+      setFusionError(err.message || "传感器模式切换失败");
+    } finally {
+      setFusionLoading(false);
+    }
+  }
+
+  async function updateFusionThreshold(threshold) {
+    const next = Number(threshold);
+    setFusionStatus((current) => (current ? { ...current, alarm_threshold: next } : current));
+    try {
+      await fetchJson("/api/fusion/threshold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threshold: next }),
+      });
+      await loadFusionStatus();
+    } catch (err) {
+      setFusionError(err.message || "报警阈值更新失败");
+    }
+  }
+
   useEffect(() => {
     refreshHealth();
     loadStreams();
     loadRealtimeFireEvents();
+    loadFusionStatus();
     const timer = window.setInterval(refreshHealth, 10000);
     return () => window.clearInterval(timer);
   }, []);
@@ -196,6 +253,11 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(loadFusionStatus, 3000);
+    return () => window.clearInterval(timer);
+  }, [historyFilters]);
+
   const focusAlert = currentAlert || selectedEvent;
   const activeStreams = health?.active_streams ?? streams.filter(isActiveStream).length;
 
@@ -213,6 +275,7 @@ function App() {
         </a>
         <nav className="nav-actions" aria-label="页面导航">
           <a href="#live">实时监控</a>
+          <a href="#fusion">融合监测</a>
           <a href="#upload">上传检测</a>
           <a href="#history">事件追踪</a>
           <StatusPill health={health} />
@@ -253,6 +316,16 @@ function App() {
         />
         <AlertPanel data={focusAlert} health={health} onHealthRefresh={refreshHealth} />
       </section>
+
+      <SensorFusionPanel
+        data={fusionStatus}
+        error={fusionError}
+        history={fusionHistory}
+        loading={fusionLoading}
+        onRefresh={() => loadFusionStatus({ loading: true })}
+        onThresholdChange={updateFusionThreshold}
+        onModeChange={switchSensorMode}
+      />
 
       <section className="workbench-grid">
         <UploadPanel
@@ -734,6 +807,212 @@ function AlertPanel({ data, health, onHealthRefresh }) {
   );
 }
 
+function SensorFusionPanel({
+  data,
+  error,
+  history,
+  loading,
+  onRefresh,
+  onThresholdChange,
+  onModeChange,
+}) {
+  const sensor = data?.sensor_data || {};
+  const weights = data?.weight_detail || {};
+  const riskDetail = data?.risk_detail || {};
+  const levelClass = data?.alert_level || "safe";
+  const threshold = Number(data?.alarm_threshold ?? 0.7);
+  const modes = [
+    { key: "normal", label: "正常模式" },
+    { key: "warning", label: "预警模式" },
+    { key: "fire", label: "火灾模式" },
+  ];
+
+  return (
+    <section className={`panel fusion-panel ${levelClass}`} id="fusion">
+      <div className="panel-heading compact">
+        <div>
+          <span className="section-label">多传感器融合监测</span>
+          <h2>决策级融合与加权风险评分</h2>
+        </div>
+        <Cpu size={26} />
+      </div>
+
+      <div className="fusion-layout">
+        <div className="fusion-main">
+          <div className={`fusion-score-card ${levelClass}`}>
+            <span>当前系统状态</span>
+            <strong>{data?.risk_level || "等待数据"}</strong>
+            <div className="risk-meter" aria-label="综合风险值">
+              <i style={{ width: `${Math.min(100, Math.max(0, Number(data?.risk_score || 0) * 100))}%` }} />
+            </div>
+            <div className="fusion-score-row">
+              <b>综合风险值 {formatDecimal(data?.risk_score)}</b>
+              <b>{data?.alarm ? "已触发报警" : "未触发报警"}</b>
+            </div>
+          </div>
+
+          <div className="sensor-grid">
+            <SensorTile icon={<Thermometer />} label="温度" value={`${formatDecimal(sensor.temperature)} °C`} />
+            <SensorTile icon={<Wind />} label="烟雾浓度" value={`${formatDecimal(sensor.smoke)} ppm`} />
+            <SensorTile icon={<Gauge />} label="CO浓度" value={`${formatDecimal(sensor.co)} ppm`} />
+            <SensorTile
+              icon={<Flame />}
+              label="火焰状态"
+              value={sensor.flame ? "检测到火焰" : "未检测到火焰"}
+              tone={sensor.flame ? "danger" : "ok"}
+            />
+          </div>
+
+          <div className="fusion-controls">
+            <div className="segmented compact" aria-label="传感器模拟模式">
+              {modes.map((item) => (
+                <button
+                  className={sensor.mode === item.key ? "active" : ""}
+                  disabled={loading}
+                  key={item.key}
+                  onClick={() => onModeChange(item.key)}
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <label className="threshold-control">
+              <span>
+                <SlidersHorizontal size={16} />
+                报警阈值 {threshold.toFixed(2)}
+              </span>
+              <input
+                max="0.95"
+                min="0.1"
+                step="0.05"
+                type="range"
+                value={threshold}
+                onChange={(event) => onThresholdChange(event.target.value)}
+              />
+            </label>
+            <button className="ghost-button" disabled={loading} onClick={onRefresh} type="button">
+              <RefreshCw className={loading ? "spin" : ""} size={16} />
+              刷新
+            </button>
+          </div>
+          {error && <div className="message warn">{error}</div>}
+        </div>
+
+        <div className="fusion-side">
+          <div className="fusion-mini-grid">
+            <InfoBadge label="YOLO置信度" value={formatDecimal(data?.fire_confidence)} />
+            <InfoBadge label="YOLO来源" value={data?.yolo_source || "未检测"} />
+            <InfoBadge label="视觉风险" value={formatDecimal(riskDetail.visual_risk)} />
+            <InfoBadge label="更新时间" value={formatTime(data?.timestamp)} />
+          </div>
+          <WeightTable weights={weights} />
+        </div>
+      </div>
+
+      <FusionTrendChart history={history} />
+    </section>
+  );
+}
+
+function SensorTile({ icon, label, value, tone = "neutral" }) {
+  return (
+    <div className={`sensor-tile ${tone}`}>
+      <span>{icon}</span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function InfoBadge({ label, value }) {
+  return (
+    <div className="info-badge">
+      <span>{label}</span>
+      <strong title={String(value)}>{value}</strong>
+    </div>
+  );
+}
+
+function WeightTable({ weights }) {
+  const rows = [
+    ["YOLO视觉检测", weights.visual],
+    ["烟雾传感器", weights.smoke],
+    ["温度传感器", weights.temperature],
+    ["CO传感器", weights.co],
+    ["火焰传感器", weights.flame],
+  ];
+  return (
+    <div className="weight-table">
+      <strong>权重明细</strong>
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <span>{label}</span>
+          <b>{formatDecimal(value)}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FusionTrendChart({ history }) {
+  const points = [...history].reverse();
+  const series = [
+    { key: "temperature", label: "温度", color: "#ff8a58", max: 100 },
+    { key: "smoke", label: "烟雾", color: "#f0c763", max: 800 },
+    { key: "co", label: "CO", color: "#55d7be", max: 160 },
+    { key: "risk", label: "风险", color: "#ffffff", max: 1 },
+  ];
+  return (
+    <div className="fusion-chart">
+      <div className="fusion-chart-heading">
+        <strong>传感器数据折线图</strong>
+        <span>最近 {points.length} 次状态采样</span>
+      </div>
+      <svg viewBox="0 0 640 190" role="img" aria-label="传感器数据折线图">
+        <g className="chart-grid">
+          {[35, 75, 115, 155].map((y) => (
+            <line key={y} x1="24" x2="620" y1={y} y2={y} />
+          ))}
+        </g>
+        {series.map((item) => (
+          <polyline
+            fill="none"
+            key={item.key}
+            points={chartPoints(points, item)}
+            stroke={item.color}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="3"
+          />
+        ))}
+      </svg>
+      <div className="chart-legend">
+        {series.map((item) => (
+          <span key={item.key}>
+            <i style={{ background: item.color }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function chartPoints(points, series) {
+  const safePoints = points.length ? points : [{ sensor_data: {}, risk_score: 0 }];
+  const count = Math.max(1, safePoints.length - 1);
+  return safePoints
+    .map((item, index) => {
+      const raw = series.key === "risk" ? item.risk_score : item.sensor_data?.[series.key];
+      const value = Math.min(series.max, Math.max(0, Number(raw) || 0));
+      const x = 24 + (596 * index) / count;
+      const y = 168 - (value / series.max) * 138;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
 function UploadPanel({ onResult }) {
   const [mode, setMode] = useState("video");
   const [file, setFile] = useState(null);
@@ -917,6 +1196,7 @@ function HistoryPanel({ items, selected, filters, setFilters, loading, onRefresh
           <option value="image">图片</option>
           <option value="video">视频</option>
           <option value="rtsp">摄像头</option>
+          <option value="fusion">多传感器融合</option>
         </select>
         <select
           aria-label="按状态筛选历史记录"
@@ -925,6 +1205,7 @@ function HistoryPanel({ items, selected, filters, setFilters, loading, onRefresh
         >
           <option value="">全部状态</option>
           <option value="danger">火灾报警</option>
+          <option value="warning">预警</option>
           <option value="safe">安全</option>
         </select>
         <button className="icon-button" disabled={loading} onClick={onRefresh} type="button" title="刷新">
@@ -1098,6 +1379,10 @@ function feishuStatusText(status) {
 
 function formatPercent(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function formatDecimal(value) {
+  return (Number(value) || 0).toFixed(2);
 }
 
 function formatTime(value) {

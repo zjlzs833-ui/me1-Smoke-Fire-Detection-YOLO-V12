@@ -26,6 +26,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+from backend.config.fusion_weights import validate_fusion_weights
+from backend.services.fusion_service import calculate_fusion_risk
+from backend.services.sensor_mock_service import SensorMockService
+
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = ROOT_DIR / "Smoke Fire.pt"
@@ -73,6 +77,16 @@ inference_device = "cuda" if torch.cuda.is_available() else "cpu"
 streams: dict[str, "StreamState"] = {}
 streams_lock = threading.Lock()
 
+sensor_mock_service = SensorMockService()
+latest_fire_confidence = 0.0
+latest_fire_confidence_source = "未检测"
+latest_fire_confidence_time: str | None = None
+latest_fire_confidence_lock = threading.Lock()
+fusion_alarm_threshold = 0.70
+fusion_last_record_time = 0.0
+fusion_record_lock = threading.Lock()
+FUSION_HISTORY_COOLDOWN_SECONDS = 60
+
 
 def load_env_files() -> None:
     for env_path in (ROOT_DIR / ".env", ROOT_DIR / "backend" / ".env"):
@@ -99,6 +113,14 @@ class StreamCreate(BaseModel):
 
 class FeishuTestRequest(BaseModel):
     message: str = "飞书机器人连接测试成功。"
+
+
+class SensorModeRequest(BaseModel):
+    mode: str
+
+
+class FusionThresholdRequest(BaseModel):
+    threshold: float
 
 
 class StreamState:
@@ -172,9 +194,27 @@ def device_info() -> dict[str, Any]:
     }
 
 
+def update_latest_fire_confidence(confidence: float, source: str) -> None:
+    global latest_fire_confidence, latest_fire_confidence_source, latest_fire_confidence_time
+    with latest_fire_confidence_lock:
+        latest_fire_confidence = max(0.0, min(1.0, float(confidence)))
+        latest_fire_confidence_source = source
+        latest_fire_confidence_time = now_iso()
+
+
+def get_latest_fire_confidence() -> dict[str, Any]:
+    with latest_fire_confidence_lock:
+        return {
+            "fire_confidence": round(latest_fire_confidence, 4),
+            "source": latest_fire_confidence_source,
+            "updated_at": latest_fire_confidence_time,
+        }
+
+
 @app.on_event("startup")
 def startup() -> None:
     load_env_files()
+    validate_fusion_weights()
     init_db()
     load_model()
 
@@ -316,6 +356,13 @@ def parse_detections(result: Any, frame: int | None = None) -> list[dict[str, An
             detection["frame"] = frame
         detections.append(detection)
     return detections
+
+
+def max_fire_confidence(detections: list[dict[str, Any]]) -> float:
+    return max(
+        (item["confidence"] for item in detections if item["class_name"] == "fire"),
+        default=0.0,
+    )
 
 
 def summarize(
@@ -525,6 +572,44 @@ def feishu_card_for_event(event: dict[str, Any]) -> dict[str, Any]:
         "warning": "orange",
         "safe": "green",
     }.get(event["alert_level"], "blue")
+    if event.get("source_type") == "fusion":
+        summary = event["summary"]
+        sensor = summary.get("sensor_data", {})
+        title = "火灾检测系统 - 多传感器融合报警"
+        content = (
+            f"**报警等级**\n{event['decision']}\n\n"
+            f"**综合风险值**\n{summary.get('risk_score', 0):.3f}\n\n"
+            f"**YOLO置信度**\n{summary.get('fire_confidence', 0):.3f}\n\n"
+            f"**传感器数据**\n"
+            f"- 温度: {sensor.get('temperature', 0)} °C\n"
+            f"- 烟雾浓度: {sensor.get('smoke', 0)} ppm\n"
+            f"- CO浓度: {sensor.get('co', 0)} ppm\n"
+            f"- 火焰状态: {'检测到火焰' if sensor.get('flame') else '未检测到火焰'}\n\n"
+            f"**报警时间**\n{event['created_at']}\n\n"
+            f"**历史记录 ID**\n{event['id']}"
+        )
+        return {
+            "msg_type": "interactive",
+            "card": {
+                "header": {
+                    "template": template,
+                    "title": {"tag": "plain_text", "content": title},
+                },
+                "elements": [
+                    {"tag": "markdown", "content": content},
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": f"来源: {event['source_name']} | 时间: {event['created_at']}",
+                            }
+                        ],
+                    },
+                ],
+            },
+        }
+
     title = {
         "danger": "火灾检测系统 - 火灾报警",
         "warning": "火灾检测系统 - 烟雾预警",
@@ -624,6 +709,10 @@ def run_stream_worker(stream: StreamState) -> None:
                 source_type="rtsp",
                 source_name=stream.name,
             )
+            update_latest_fire_confidence(
+                max_fire_confidence(detections),
+                f"RTSP: {stream.name}",
+            )
             annotated = result.plot()
             encoded_ok, encoded = cv2.imencode(
                 ".jpg",
@@ -715,6 +804,111 @@ def health() -> dict[str, Any]:
     }
 
 
+def build_fusion_event_payload(fusion: dict[str, Any]) -> dict[str, Any]:
+    sensor = fusion["sensor_data"]
+    risk_score = fusion["risk_score"]
+    risk_level = fusion["risk_level"]
+    fire_confidence = fusion["fire_confidence"]
+    flame_text = "检测到火焰" if sensor.get("flame") else "未检测到火焰"
+    situation = (
+        f"多传感器融合判断为{risk_level}，综合风险值 {risk_score:.3f}。"
+        f"温度 {sensor.get('temperature')} °C，烟雾 {sensor.get('smoke')} ppm，"
+        f"CO {sensor.get('co')} ppm，火焰状态：{flame_text}。"
+    )
+    message = (
+        f"YOLO 最高置信度 {fire_confidence * 100:.1f}%，"
+        f"融合报警阈值 {fusion['alarm_threshold']:.2f}。"
+    )
+    actions = DEFAULT_ACTIONS if fusion["alarm"] else DEFAULT_ACTIONS[:2]
+    return {
+        "alert_level": fusion["alert_level"],
+        "decision": risk_level,
+        "fire_occurred": fusion["alarm"],
+        "smoke_detected": sensor.get("smoke", 0) >= 150,
+        "summary": {
+            "message": message,
+            "situation": situation,
+            "actions": actions,
+            "fire_count": 1 if fusion["alarm"] else 0,
+            "smoke_count": 1 if sensor.get("smoke", 0) >= 150 else 0,
+            "total_detections": 0,
+            "max_confidence": fire_confidence,
+            "frame_count": None,
+            "source_type": "fusion",
+            "source_name": "多传感器融合",
+            "fire_confidence": fire_confidence,
+            "sensor_data": sensor,
+            "risk_detail": fusion["risk_detail"],
+            "weight_detail": fusion["weight_detail"],
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "alarm": fusion["alarm"],
+            "alarm_threshold": fusion["alarm_threshold"],
+        },
+    }
+
+
+def maybe_record_fusion_event(fusion: dict[str, Any]) -> dict[str, Any] | None:
+    global fusion_last_record_time
+    if fusion["alert_level"] == "safe":
+        return None
+
+    current_time = time.time()
+    with fusion_record_lock:
+        if current_time - fusion_last_record_time < FUSION_HISTORY_COOLDOWN_SECONDS:
+            return None
+        fusion_last_record_time = current_time
+
+    return create_history_event(
+        source_type="fusion",
+        source_name="多传感器融合",
+        result_payload=build_fusion_event_payload(fusion),
+        detections=[],
+    )
+
+
+@app.get("/api/sensors/latest")
+def get_latest_sensors() -> dict[str, Any]:
+    return sensor_mock_service.latest()
+
+
+@app.post("/api/sensors/mode")
+def set_sensor_mode(payload: SensorModeRequest) -> dict[str, Any]:
+    try:
+        return sensor_mock_service.set_mode(payload.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/fusion/threshold")
+def set_fusion_threshold(payload: FusionThresholdRequest) -> dict[str, Any]:
+    global fusion_alarm_threshold
+    if not 0.1 <= payload.threshold <= 0.95:
+        raise HTTPException(status_code=400, detail="threshold 必须在 0.1 到 0.95 之间")
+    fusion_alarm_threshold = round(float(payload.threshold), 2)
+    return {"success": True, "threshold": fusion_alarm_threshold}
+
+
+@app.get("/api/fusion/status")
+def get_fusion_status() -> dict[str, Any]:
+    sensor_data = sensor_mock_service.latest()
+    yolo_state = get_latest_fire_confidence()
+    fusion = calculate_fusion_risk(
+        fire_confidence=yolo_state["fire_confidence"],
+        temperature=sensor_data["temperature"],
+        smoke=sensor_data["smoke"],
+        co=sensor_data["co"],
+        flame=sensor_data["flame"],
+        alarm_threshold=fusion_alarm_threshold,
+    )
+    fusion["sensor_data"] = {**fusion["sensor_data"], "mode": sensor_data["mode"]}
+    fusion["timestamp"] = sensor_data["timestamp"]
+    fusion["yolo_source"] = yolo_state["source"]
+    fusion["yolo_updated_at"] = yolo_state["updated_at"]
+    fusion["history_event"] = maybe_record_fusion_event(fusion)
+    return fusion
+
+
 @app.post("/api/detect/image")
 async def detect_image(
     file: UploadFile = File(...),
@@ -738,6 +932,7 @@ async def detect_image(
 
     detections = parse_detections(result)
     summary = summarize(detections, source_type="image", source_name=file.filename or "上传图片")
+    update_latest_fire_confidence(max_fire_confidence(detections), f"图片: {file.filename or input_path.name}")
     event = create_history_event(
         "image",
         file.filename or input_path.name,
@@ -808,6 +1003,7 @@ async def detect_video(
         source_type="video",
         source_name=file.filename or "上传视频",
     )
+    update_latest_fire_confidence(max_fire_confidence(all_detections), f"视频: {file.filename or input_path.name}")
     event = create_history_event(
         "video",
         file.filename or input_path.name,

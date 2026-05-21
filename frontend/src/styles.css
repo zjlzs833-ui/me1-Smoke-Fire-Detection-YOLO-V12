@@ -542,6 +542,9 @@ h2 {
 .fire-results-panel.danger {
   background: rgba(216, 92, 50, 0.13);
   border: 1px solid rgba(216, 92, 50, 0.34);
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(620px, 72vh);
+  overflow: hidden;
 }
 
 .fire-results-heading {
@@ -575,17 +578,42 @@ h2 {
 
 .fire-result-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  max-height: 520px;
-  overflow: auto;
-  padding-right: 2px;
+  gap: 10px;
+  grid-template-columns: 1fr;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scrollbar-color: rgba(255, 115, 71, 0.8) rgba(255, 255, 255, 0.08);
+  scrollbar-width: thin;
+}
+
+.fire-result-grid::-webkit-scrollbar {
+  width: 9px;
+}
+
+.fire-result-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+.fire-result-grid::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #ff855f, #d85c32);
+  border: 2px solid rgba(19, 29, 34, 0.9);
+  border-radius: 999px;
+}
+
+.fire-result-grid::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ffa078, #ff7347);
 }
 
 .fire-result-card {
   background: rgba(5, 8, 10, 0.3);
   border: 1px solid rgba(226, 238, 242, 0.09);
   border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  min-height: 174px;
   overflow: hidden;
 }
 
@@ -601,6 +629,8 @@ h2 {
 }
 
 .fire-result-copy {
+  align-content: start;
+  display: grid;
   padding: 12px;
 }
 
@@ -1193,6 +1223,18 @@ code {
   .fire-results-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .fire-results-panel.danger {
+    max-height: min(560px, 78vh);
+  }
+
+  .fire-result-grid {
+    padding-right: 6px;
+  }
+
+  .fire-result-card {
+    grid-template-columns: 1fr;
   }
 
   .stream-name {
